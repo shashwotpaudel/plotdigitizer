@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=PlotDigitizer
+GenericName=Plot Digitizer
+Comment=Read the numbers back out of a picture of a plot
+Exec=plotdigitizer-gui %f
+Icon=plotdigitizer
+Terminal=false
+Categories=Science;Education;Graphics;
+MimeType=image/png;image/jpeg;image/tiff;image/bmp;
+Keywords=plot;chart;graph;digitizer;data;extract;

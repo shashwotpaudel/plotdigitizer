@@ -1,0 +1,13 @@
+# GPU build: the CPU runtime plus torch and the CUDA execution provider.
+#
+# See requirements-cpu.txt for why versions are pinned exactly rather than ranged.
+PySide6-Essentials==6.9.3
+numpy==2.5.2
+opencv-python-headless==4.14.0.94
+Pillow==12.3.0
+matplotlib==3.11.1
+
+# torch brings the CUDA runtime with it, which is nearly all of this build's size.
+# The image still relies on the host's NVIDIA driver; it cannot supply that.
+torch==2.13.0
+onnxruntime-gpu==1.28.0

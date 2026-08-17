@@ -1,0 +1,25 @@
+# Runtime for the portable build.
+#
+# Versions are pinned exactly, for two reasons. A distributed binary should be
+# reproducible; and python-appimage hands each line to a shell unquoted, so a
+# specifier containing < or > is read as a redirection and the build fails - or worse,
+# silently writes a file named "=2.0".
+#
+# PySide6-Essentials rather than the full PySide6 meta-package: only QtCore, QtGui and
+# QtWidgets are used, and Essentials is 97 MB against 649 MB.
+#
+# The 6.9 series is deliberate: it is the newest that still builds against an older
+# toolchain. Measured with objdump over every ELF file in the finished image, the
+# highest symbol version any of them needs is GLIBC_2.28 - Debian 10, Ubuntu 18.10,
+# RHEL 8 and later. Qt 6.11 needs 2.34, which would have cost every distribution
+# released before 2021.
+#
+# This pin only holds because the project depends on PySide6-Essentials too. When it
+# asked for plain "PySide6", pip installed the pinned Essentials and then satisfied the
+# project's own requirement by pulling the full 6.11 meta-package over the top - a
+# silent 123 MB and six years of distribution support, lost to a dependency name.
+PySide6-Essentials==6.9.3
+numpy==2.5.2
+opencv-python-headless==4.14.0.94
+Pillow==12.3.0
+matplotlib==3.11.1
