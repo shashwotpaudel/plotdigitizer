@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Test figures are generated on demand by tests/conftest.py, deterministically from
+# tools/make_test_plots.py and tools/make_holdout.py, so the images themselves are
+# build output rather than source.
+tests/data/
+tests/holdout/
+
+# AppImage build output
+packaging/build/
+*.AppImage
+*.AppDir/
+
+# Editors
+.idea/
+.vscode/
+*.swp
