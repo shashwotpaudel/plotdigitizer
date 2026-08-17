@@ -1,0 +1,9 @@
+title: Plot Digitizer
+description: Read the numbers back out of a picture of a plot
+theme: jekyll-theme-cayman
+show_downloads: false
+
+# The site is built from this directory alone, so the rest of the repository is never
+# published. Links between pages are written as .md and rewritten to .html by
+# jekyll-relative-links, which GitHub Pages enables by default, so they work both here
+# and when the files are read on GitHub.
