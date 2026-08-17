@@ -49,11 +49,7 @@ Full guide at **[shashwotpaudel.github.io/plotdigitizer](https://shashwotpaudel.
 
 ## Accuracy
 
-Measured against figures rendered from known data, so the comparison is with the real
-numbers rather than an estimate. Axis calibration lands within 1.5 px on every test
-figure; extracted points sit about 0.14 % of the axis range from the truth, roughly a
-fifth of a pixel on a 500-pixel axis. The [FAQ](docs/faq.md#how-accurate-is-it) explains
-how to reproduce that.
+Look at the [FAQ](docs/faq.md#how-accurate-is-it).
 
 ## License
 
