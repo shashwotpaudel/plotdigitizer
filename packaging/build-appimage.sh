@@ -3,7 +3,12 @@
 # Build a portable AppImage.
 #
 #   ./packaging/build-appimage.sh cpu     # ~200 MB, no GPU support
-#   ./packaging/build-appimage.sh cuda    # several GB, bundles torch + CUDA
+#   ./packaging/build-appimage.sh cuda    # ~3 GB, bundles torch + CUDA
+#
+# The cuda variant unpacks to roughly 9 GB before it is compressed, so the build needs
+# that much scratch space. It is directed at packaging/build/tmp rather than /tmp,
+# because /tmp is a memory-backed filesystem on many distributions and mksquashfs
+# fails there with "Quota exceeded" partway through. Set TMPDIR yourself to override.
 #
 # python-appimage downloads a manylinux Python and pip-installs the requirements into
 # it, so no container runtime is needed. The interpreter comes from the image rather
@@ -20,6 +25,11 @@ esac
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$HERE")"
 BUILD="$HERE/build"
+
+# Keep scratch space on the same disk as the repository; see the note above.
+export TMPDIR="${TMPDIR:-$BUILD/tmp}"
+mkdir -p "$TMPDIR"
+trap 'rm -rf "$BUILD/tmp"' EXIT
 RECIPE="$BUILD/recipe-$VARIANT"
 
 # Python 3.12: new enough for the project, old enough that every dependency publishes
