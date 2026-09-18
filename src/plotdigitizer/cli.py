@@ -148,10 +148,15 @@ def main(argv: list[str] | None = None) -> int:
 
         result = digitizer.run(image)
 
-        if args.output and len(images) == 1 and not Path(args.output).is_dir():
+        # A trailing slash says "directory" even when it does not exist yet; without
+        # this, `-o out/` on a single image wrote a file called "out".
+        wants_directory = bool(args.output) and (
+            Path(args.output).is_dir() or args.output.endswith(("/", "\\")))
+        if args.output and len(images) == 1 and not wants_directory:
             target = Path(args.output)
         else:
             directory = Path(args.output) if args.output else image_path.parent
+            directory.mkdir(parents=True, exist_ok=True)
             target = directory / f"{image_path.stem}.csv"
 
         written = write_csv(target, result.series, options)
