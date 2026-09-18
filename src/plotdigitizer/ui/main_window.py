@@ -214,7 +214,24 @@ class MainWindow(QMainWindow):
         self.action_auto = QAction("Auto-digitize", self)
         self.action_auto.setShortcut("Ctrl+D")
         self.action_auto.triggered.connect(self.auto_digitize)
-        bar.addAction(self.action_auto)
+
+        # Options for the automatic pass hang off the button itself, where they are
+        # found by whoever is wondering why it did what it did.
+        self.action_separate = QAction("Split series that share a colour", self)
+        self.action_separate.setCheckable(True)
+        self.action_separate.setChecked(
+            self._settings().value("detect/separate", True, type=bool))
+        self.action_separate.setToolTip(
+            "Tell apart series drawn in the same colour by their line style, marker\n"
+            "shape and continuity. Turn off to keep each colour as one series.")
+        self.action_separate.toggled.connect(self._set_separate)
+        auto_menu = QMenu(self)
+        auto_menu.addAction(self.action_separate)
+        auto_button = QToolButton(self)
+        auto_button.setDefaultAction(self.action_auto)
+        auto_button.setMenu(auto_menu)
+        auto_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        bar.addWidget(auto_button)
         bar.addSeparator()
 
         self.action_undo = QAction("Undo", self)
@@ -515,12 +532,24 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Detecting axes and data...")
         self.action_auto.setEnabled(False)
 
-        self._worker = DigitizeWorker(self._image, self._device)
+        self._worker = DigitizeWorker(self._image, self._device,
+                                      separate=self.action_separate.isChecked())
         self._worker.finished_ok.connect(self._on_digitized)
         self._worker.failed.connect(self._on_digitize_failed)
         self._worker.finished.connect(lambda: (self.progress.hide(),
                                                self.action_auto.setEnabled(True)))
         self._worker.start()
+
+    def _set_separate(self, on: bool) -> None:
+        self._settings().setValue("detect/separate", bool(on))
+        if self._image is None:
+            return
+        self.statusBar().showMessage(
+            "Splitting series that share a colour." if on
+            else "Keeping each colour as one series.", 5000)
+        # Re-run at once so the effect is visible. It asks first if there is manual
+        # work to lose, and like any detection it can be undone.
+        self.auto_digitize()
 
     def _on_digitize_failed(self, message: str) -> None:
         QMessageBox.critical(self, "Automatic digitization failed", message)
@@ -690,6 +719,8 @@ class MainWindow(QMainWindow):
                     "points": s.pixel_points.copy(),
                     "mask": s.mask,
                     "sources": copy.deepcopy(s.sources),
+                    "style": s.style,
+                    "display": s.display,
                 }
                 for s in self._result.series
             ],
@@ -719,6 +750,8 @@ class MainWindow(QMainWindow):
             series.pixel_points = entry["points"].copy()
             series.mask = entry.get("mask")
             series.sources = copy.deepcopy(entry.get("sources"))
+            series.style = entry.get("style", "")
+            series.display = entry.get("display")
         self._active = snapshot["active"]
         # Point indices have just been rewritten wholesale, so any selection held
         # against the old ones is meaningless - and a selection pointing at the wrong

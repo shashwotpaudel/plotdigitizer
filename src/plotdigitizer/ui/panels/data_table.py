@@ -129,7 +129,7 @@ class DataPanel(QWidget):
         self._axes.clear()
         if self._series is not None and self._series.data_points.shape[0]:
             points = self._series.data_points
-            colour = self._series.hex_color
+            colour = self._series.display_hex
             order = np.argsort(points[:, 0])
             style = "o" if self._series.settings.mode.value == "scatter" else "-"
             self._axes.plot(points[order, 0], points[order, 1], style,

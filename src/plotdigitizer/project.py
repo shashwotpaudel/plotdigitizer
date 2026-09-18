@@ -54,6 +54,8 @@ def _sources_to_dict(sources):
                         else None,
             "pixel_points": [[float(x), float(y)] for x, y in points.reshape(-1, 2)],
             "sources": _sources_to_dict(source.get("sources")),
+            "style": source.get("style", ""),
+            "display": [int(v) for v in source["display"]] if source.get("display") else None,
         })
     return out
 
@@ -72,6 +74,8 @@ def _sources_from_dict(stored):
             "settings": _settings_from_dict(entry.get("settings") or {}),
             "pixel_points": points.reshape(-1, 2),
             "sources": _sources_from_dict(entry.get("sources")),
+            "style": entry.get("style", ""),
+            "display": tuple(entry["display"]) if entry.get("display") else None,
         })
     return out
 
@@ -98,6 +102,8 @@ def save_project(path: str | Path, result: DigitizationResult,
                 "pixel_points": [[float(x), float(y)] for x, y in series.pixel_points],
                 # Provenance of a combined series, so a split survives save and reload.
                 "sources": _sources_to_dict(series.sources),
+                "style": series.style,
+                "display": list(series.display) if series.display else None,
             }
             for series in result.series
         ],
@@ -134,6 +140,8 @@ def load_project(path: str | Path) -> tuple[DigitizationResult, str | None]:
             data_points=np.empty((0, 2), dtype=float),
             visible=bool(entry.get("visible", True)),
             sources=_sources_from_dict(entry.get("sources")),
+            style=entry.get("style", ""),
+            display=tuple(entry["display"]) if entry.get("display") else None,
         )
         item.recompute_data(calibration)
         series.append(item)

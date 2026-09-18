@@ -32,6 +32,16 @@ from ...detect.extract import ExtractionMode, ExtractionSettings
 __all__ = ["SeriesPanel"]
 
 
+def _label(series) -> str:
+    """The list entry: name, size, how it is drawn when that matters, and merges."""
+    text = f"{series.name}  ({series.count} pts)"
+    if series.style:
+        text += f"  - {series.style}"
+    if series.is_combined:
+        text += f"  [{len(series.sources)} merged]"
+    return text
+
+
 def _swatch(colour: tuple[int, int, int], size: int = 12) -> QIcon:
     pixmap = QPixmap(size, size)
     pixmap.fill(QColor(*colour))
@@ -174,9 +184,7 @@ class SeriesPanel(QWidget):
             self._series = list(series_list)
             self._list.clear()
             for series in self._series:
-                suffix = (f"  [{len(series.sources)} merged]" if series.is_combined else "")
-                item = QListWidgetItem(_swatch(series.color),
-                                       f"{series.name}  ({series.count} pts){suffix}")
+                item = QListWidgetItem(_swatch(series.display_color), _label(series))
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable
                               | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(Qt.CheckState.Checked if series.visible
@@ -204,10 +212,8 @@ class SeriesPanel(QWidget):
             for row, series in enumerate(self._series):
                 item = self._list.item(row)
                 if item is not None:
-                    suffix = (f"  [{len(series.sources)} merged]"
-                              if series.is_combined else "")
-                    item.setText(f"{series.name}  ({series.count} pts){suffix}")
-                    item.setIcon(_swatch(series.color))
+                    item.setText(_label(series))
+                    item.setIcon(_swatch(series.display_color))
         finally:
             self._loading = False
         self._update_summary(self._list.currentRow())
@@ -254,8 +260,12 @@ class SeriesPanel(QWidget):
             self._summary.setText("")
             return
         series = self._series[index]
+        # Say what told this series apart when colour did not: several series can
+        # share one ink, and "#000000" alone would not say which of them this is.
+        drawn = (f"{series.style}, ink {series.hex_color}" if series.style
+                 else series.hex_color)
         self._summary.setText(
-            f"{series.count} points - {series.hex_color}. "
+            f"{series.count} points - {drawn}. "
             f"Left-click the figure to add a point, right-click one to delete it."
         )
 

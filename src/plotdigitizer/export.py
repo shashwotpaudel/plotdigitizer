@@ -199,6 +199,7 @@ def write_json(path: str | Path, result, options: ExportOptions | None = None) -
             {
                 "name": series.name,
                 "color": series.hex_color,
+                "style": series.style,
                 "mode": series.settings.mode.value,
                 "points": [[float(x), float(y)] for x, y in series.data_points],
             }

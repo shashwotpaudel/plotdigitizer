@@ -43,6 +43,7 @@ def _describe(result: DigitizationResult) -> str:
             f"  {series.name:10s}: {series.count:4d} points  {series.hex_color}  "
             f"{series.settings.mode.value:7s}  "
             f"x {first[0]:.4g}..{last[0]:.4g}"
+            + (f"  ({series.style})" if series.style else "")
         )
     return "\n".join(lines)
 
@@ -87,6 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "scanned or unusual figures")
     parser.add_argument("--colour-tolerance", type=float, default=28.0,
                         help="how far a pixel may sit from a series colour, in Lab units")
+    parser.add_argument("--no-separate", action="store_true",
+                        help="keep each colour as one series, instead of splitting series "
+                             "that share a colour by line style, marker shape and "
+                             "continuity")
     parser.add_argument("--precision", type=int, default=None,
                         help="significant digits in the CSV (default: full precision)")
     parser.add_argument("--gui", action="store_true",
@@ -122,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
 
     digitizer = AutoDigitizer(device=args.device, max_series=args.max_series,
                               colour_tolerance=args.colour_tolerance,
-                              ocr_engine=args.ocr)
+                              ocr_engine=args.ocr, separate=not args.no_separate)
     if not args.quiet:
         print(f"device: {digitizer.backend.describe()}")
 
