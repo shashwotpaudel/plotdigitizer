@@ -16,20 +16,47 @@ It does **not** read bar charts, pie or doughnut charts, polar plots, ternary di
 box plots, heatmaps, contour maps or anything three-dimensional. Given one it will still
 find a frame and some ink and produce output, but that output will not mean anything.
 
-### Curves drawn in the same colour arrive merged
+### Curves drawn in the same colour
 
-Series are separated by colour. A figure printed in black ink has one colour, so every
-curve in it lands in a single series.
+Series are separated by colour first. Where several share a colour — a figure printed
+in black ink is the usual case — they are told apart the way a reader would:
 
-[Trace stroke and sweeping](workflows.md#black-and-white-figures) exist for exactly this
-and pull the curves apart by following their continuity instead. It is a manual step,
-and on a busy monochrome figure it is the bulk of the work.
+- by **marker shape**: circles, squares, triangles, diamonds, crosses;
+- by **line style**: solid, dashed, dotted, dash-dot;
+- by **continuity**, where several lines share a style: each one is followed through
+  the places where it crosses another.
+
+Markers drawn on a line are taken to be that line's markers. Markers on no line are a
+scatter series of their own.
+
+What it cannot do:
+
+- Two scatter series drawn with the **same marker in the same colour** come back as one.
+  Nothing in the image separates them.
+- Two lines in the **same style** that run along each other for a long stretch, or cross
+  at a very shallow angle, can come out of it swapped. See the next section.
+- On a very small figure, where a dash is only a few pixels long, dashes can be taken
+  for dots. The lines still separate; only the description in the Series list is wrong.
+
+If a figure is split where you did not want it to be, click the arrow beside
+**Auto-digitize** and untick **Split series that share a colour**, or pass
+`--no-separate` on the command line. Each colour then comes back as one series, as in
+v0. [Trace stroke and sweeping](workflows.md#black-and-white-figures) remain for
+anything the automatic pass gets wrong.
 
 ### Overlapping curves cannot be separated
 
 Where two curves genuinely lie on top of each other, nothing in the image says which
-points belong to which. A trace through such a region follows whichever curve it was
-already on, and its output there may belong to either.
+points belong to which.
+
+The automatic split does not guess there. Where two lines in one style coincide, both
+series report the shared ink. Where a dotted or dashed line runs under a solid one, its
+dots and dashes fuse into the solid line and it is left with a gap. Where lines run
+through a dense band of markers, the band goes to the markers and the lines are left
+with gaps. A gap is often the honest answer rather than a fault.
+
+A trace through such a region follows whichever curve it was already on, and its output
+there may belong to either.
 
 This is not a tuning problem — the information is absent. On the figure used to develop
 these tools, three curves converge above roughly 700 Hz and every trace, seeded on any
@@ -97,6 +124,37 @@ style with no axis lines, JPEG compression, serif and monospace labels, two-tone
 and monochrome line art. Four of those six broke the detector the first time they were
 run.
 
+### Series that share a colour
+
+Telling apart series drawn in one colour is measured the same way, against black-ink
+figures drawn from known data. Two numbers matter for each true series. **Purity** is
+the fraction of the detected series' points that lie on that curve and not on another;
+**coverage** is the fraction of the curve the series reaches. A point counts as on a
+curve within 3 pixels of it.
+
+| corpus | figures | series count right | mean purity | mean coverage |
+|---|---|---|---|---|
+| `tests/samecolour` | 11 | 11/11 | 0.997 | 0.968 |
+| `tests/samecolour_holdout` | 7 | 7/7 | 0.996 | 0.955 |
+
+Purity is the one to watch: a series that has picked up points from a neighbouring
+curve looks exactly as convincing as a clean one. Coverage falls short mostly where
+curves coincide, which is expected.
+
+As before, the second set was written after the method was fixed. On its first run six
+of the seven figures came out right. The seventh, 320×240 with one-pixel lines, came
+back with two extra grey series; the fault was in the colour separation and was already
+there in v0. It was fixed after that run, so the held-out numbers above are no longer
+entirely free of tuning. First-run figures were 6/7, 0.996 and 0.941.
+
+```bash
+python tools/separation_report.py
+python tools/separation_report.py --data tests/samecolour_holdout
+```
+
+The two original corpora give exactly the numbers in the table above: on a figure
+whose colours already tell its series apart, the split changes nothing.
+
 ## Does it need a GPU?
 
 No. Everything works on the CPU.
@@ -138,9 +196,12 @@ scans; on ordinary rendered figures the default reader is better.
 
 Too many usually means something structural was mistaken for data — an unframed legend,
 an annotation, or an axis style the frame detector misread. Lasso the strays and delete
-them, or delete the whole spurious series.
+them, or delete the whole spurious series. On a figure whose series share a colour, one
+line can also come back in two pieces; **Combine** them.
 
-Too few means curves share a colour. See
+Too few means series share a colour and could not be told apart — the same marker twice,
+or two lines in one style lying on top of each other. See
+[curves drawn in the same colour](#curves-drawn-in-the-same-colour) and
 [black-and-white figures](workflows.md#black-and-white-figures).
 
 ### A curve was traced as a line when it is a scatter
@@ -173,7 +234,7 @@ If it does nothing at all, your system may lack FUSE. Either install it, or extr
 run without it:
 
 ```bash
-./plotdigitizer-v0-x86_64.AppImage --appimage-extract
+./plotdigitizer-v1.1-x86_64.AppImage --appimage-extract
 ./squashfs-root/AppRun
 ```
 

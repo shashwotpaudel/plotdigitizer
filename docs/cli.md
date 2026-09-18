@@ -28,6 +28,7 @@ non-zero exit status rather than quietly writing numbers it could not calibrate.
 | `--max-series N` | Upper bound on how many series to separate. Default 8 |
 | `--ocr {template,neural}` | Label reader. Default `template`, which needs no download |
 | `--colour-tolerance F` | How far a pixel may sit from a series colour, in Lab units. Default 28 |
+| `--no-separate` | Keep each colour as one series, instead of splitting series that share a colour by line style, marker shape and continuity |
 | `--precision N` | Significant digits in the CSV. Default is full precision |
 | `--gui` | Open the image in the window instead of exporting |
 | `-q`, `--quiet` | Only report problems |
@@ -72,6 +73,21 @@ multi_scatter_legend.png  (446 ms on cuda)
   Series 3  :   14 points  #fe8113  scatter  x 1.01..8.99
   -> out/multi_scatter_legend.csv
 ```
+
+Series that share a colour are split, and each says how it is drawn:
+
+```
+microphone.png  (602 ms on cpu)
+  frame      : x 100.0..720.0, y 53.0..392.0 (confidence 1.00)
+  x axis     : 9.98333 .. 5021.07  [log10] (confidence 0.91)
+  y axis     : -0.0720999 .. 89.9128  [linear] (confidence 0.97)
+  Series 1  :  528 points  #030303  curve    x 24.88..4921  (solid line)
+  Series 2  :  146 points  #030303  curve    x 24.88..688.7  (dotted line)
+  Series 3  :  208 points  #030303  scatter  x 16..4588  (hollow triangle markers)
+  -> out/microphone.csv
+```
+
+With `--json`, each series in the JSON carries the same description as `style`.
 
 The confidences are worth reading. Anything below about 0.5 on an axis means the fit was
 loose and the figure deserves a look in the window.

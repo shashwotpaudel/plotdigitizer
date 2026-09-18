@@ -9,12 +9,21 @@ something more.
 
 ## Black-and-white figures
 
-Curves are separated by colour. A journal figure printed in black ink has only one
-colour, so every curve on it belongs to the same cluster and the automatic pass returns
-them merged into a single series. No threshold can fix that — the information simply is
-not in the colour.
+A journal figure printed in black ink has only one colour, so colour cannot tell its
+curves apart. The automatic pass uses what a reader uses instead: the marker shape, the
+line style, and the fact that each curve is continuous. A figure with a solid line, a
+dotted line and a set of triangles comes back as three series without any clicking.
 
-What *does* distinguish the curves is that each one is continuous. Two tools use that.
+![Three black series told apart](samecolour.png)
+
+Each is listed with how it is drawn — *solid line*, *dotted line*, *hollow triangle
+markers* — and shown on the figure in a colour of its own, so you can see which is
+which. Its ink colour is still what is recorded.
+
+Check each against the figure. Where curves coincide, a series is left with a gap rather
+than a guess; where two lines in one style tangle, they can come out swapped. The two
+tools below are for putting that right, and for figures where you would rather do it by
+hand: turn the automatic split off from the arrow beside **Auto-digitize**.
 
 ### Trace stroke
 
@@ -26,7 +35,8 @@ lines survive. The result becomes its own series.
 This is fully automatic and usually recovers most of a curve from one click. It works
 because a curve *goes somewhere* while its neighbours merely pass nearby.
 
-Delete the merged series first, then trace each curve in turn.
+To redo a curve the automatic pass got wrong, delete its series and trace it again. With
+the split turned off, delete the merged series first, then trace each curve in turn.
 
 ### Sweeping along a curve
 

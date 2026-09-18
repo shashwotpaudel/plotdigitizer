@@ -14,8 +14,8 @@ Download the AppImage from the [latest release](https://github.com/shashwotpaude
 make it executable and run it:
 
 ```bash
-chmod +x plotdigitizer-v0-x86_64.AppImage
-./plotdigitizer-v0-x86_64.AppImage
+chmod +x plotdigitizer-v1.1-x86_64.AppImage
+./plotdigitizer-v1.1-x86_64.AppImage
 ```
 
 Or install from source:
