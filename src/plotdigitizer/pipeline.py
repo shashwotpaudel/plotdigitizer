@@ -23,10 +23,11 @@ import numpy as np
 
 from .backend import Backend, select_backend
 from .calibration import AxisCalibration, AxisScale, Calibration, fit_axis
-from .detect.extract import ExtractionSettings, choose_mode, extract_points
+from .detect.extract import ExtractionMode, ExtractionSettings, choose_mode, extract_points
 from .detect.frame import InkImage, PlotFrame, analyse_ink, detect_frame
 from .detect.labels import AxisLabels, detect_labels
 from .detect.ocr import get_default_ocr
+from .detect.separate import separate_series
 from .detect.series import PlotContent, discover_series
 from .detect.ticks import TickSet, detect_ticks
 
@@ -49,10 +50,26 @@ class Series:
     #: When this series was combined from others, everything needed to restore them.
     #: Its presence is what makes a combine reversible rather than destructive.
     sources: list[dict] | None = field(default=None, repr=False)
+    #: How the series is drawn - "dotted line", "hollow triangle markers" - when that
+    #: is what told it apart from others of the same colour. Empty otherwise.
+    style: str = ""
+    #: Colour to show it in, when its own ink colour would not do: series separated
+    #: from one black mask would otherwise all be drawn black, on top of black ink.
+    display: tuple[int, int, int] | None = None
 
     @property
     def hex_color(self) -> str:
         r, g, b = self.color
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    @property
+    def display_color(self) -> tuple[int, int, int]:
+        """The colour the interface draws this series in."""
+        return tuple(self.display) if self.display else tuple(self.color)
+
+    @property
+    def display_hex(self) -> str:
+        r, g, b = self.display_color
         return f"#{r:02x}{g:02x}{b:02x}"
 
     @property
@@ -104,6 +121,33 @@ class DigitizationResult:
             series.recompute_data(self.calibration)
 
 
+#: Colours for series separated from one ink. Strong, distinct hues that read against
+#: black ink and against each other.
+SEPARATED_PALETTE = [
+    (174, 62, 201), (47, 158, 68), (214, 51, 108), (12, 133, 153),
+    (245, 159, 0), (92, 148, 13), (140, 90, 40), (40, 60, 160),
+]
+#: Colours the canvas already uses for its own overlays: the calibration handles and
+#: the plot frame. A series drawn in either would be lost against them.
+_OVERLAY_COLOURS = [(232, 89, 12), (255, 169, 77), (64, 160, 255)]
+
+
+def _display_colours(count: int, avoid: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
+    """``count`` palette colours, skipping any close to an ink or overlay on screen."""
+    chosen: list[tuple[int, int, int]] = []
+    taken = [np.asarray(c, dtype=float) for c in list(avoid) + _OVERLAY_COLOURS]
+    for colour in SEPARATED_PALETTE * 2:
+        if len(chosen) == count:
+            break
+        rgb = np.asarray(colour, dtype=float)
+        if all(np.linalg.norm(rgb - t) > 90 for t in taken) and colour not in chosen:
+            chosen.append(colour)
+            taken.append(rgb)
+    while len(chosen) < count:
+        chosen.append(SEPARATED_PALETTE[len(chosen) % len(SEPARATED_PALETTE)])
+    return chosen
+
+
 def _inward_reach(tickset: TickSet) -> int:
     """How far this axis's ticks intrude into the plot area, 0 if they point outwards."""
     if tickset is None or tickset.side != "inside":
@@ -122,7 +166,7 @@ class AutoDigitizer:
 
     def __init__(self, device: str = "auto", ocr=None, max_series: int = 8,
                  colour_tolerance: float = 28.0, backend: Backend | None = None,
-                 ocr_engine: str = "template"):
+                 ocr_engine: str = "template", separate: bool = True):
         self.backend = backend or select_backend(device)
         # "template" is the default because it reads rendered axis labels perfectly
         # and needs nothing downloaded; "neural" is for scans and odd typefaces and
@@ -130,6 +174,8 @@ class AutoDigitizer:
         self.ocr = ocr or get_default_ocr(prefer_neural=(ocr_engine == "neural"))
         self.max_series = max_series
         self.colour_tolerance = colour_tolerance
+        #: Split series that share a colour by marker shape, line style and continuity.
+        self.separate = separate
 
     # -- stages ------------------------------------------------------------------
 
@@ -158,21 +204,47 @@ class AutoDigitizer:
             return _fallback_axis(frame.left, frame.right), 0.0
         return _fallback_axis(frame.bottom, frame.top), 0.0
 
-    def _build_series(self, content: PlotContent, calibration: Calibration) -> list[Series]:
+    def _build_series(self, content: PlotContent, calibration: Calibration,
+                      frame: PlotFrame) -> list[Series]:
         series: list[Series] = []
+        inks = [c.color_rgb for c in content.series]
+        used: list[tuple[int, int, int]] = []
         for candidate in content.series:
-            settings = ExtractionSettings(mode=choose_mode(candidate.mask))
-            points = extract_points(candidate.mask, settings, self.backend)
-            item = Series(
-                name=candidate.name,
-                color=candidate.color_rgb,
-                settings=settings,
-                pixel_points=points,
-                data_points=np.empty((0, 2), dtype=float),
-                mask=candidate.mask,
-            )
-            item.recompute_data(calibration)
-            series.append(item)
+            parts = separate_series(candidate.mask, plot_width=int(frame.width)) \
+                if self.separate else None
+            if parts is None:
+                settings = ExtractionSettings(mode=choose_mode(candidate.mask))
+                pieces = [(candidate.mask, settings, "")]
+            else:
+                # The separator knows what each part is, which is better evidence than
+                # the shape statistics choose_mode works from: the dots of a dotted
+                # line are identical glyphs too, but they are still a line.
+                pieces = [(part.mask,
+                           ExtractionSettings(mode=ExtractionMode.SCATTER
+                                              if part.kind == "markers" else ExtractionMode.CURVE),
+                           part.description, part.points)
+                          for part in parts]
+            shades = _display_colours(len(pieces), inks + used) if parts else [None]
+            used.extend(c for c in shades if c)
+            for (mask, settings, style, *given), shade in zip(pieces, shades):
+                if given and given[0] is not None:
+                    points = np.asarray(given[0], dtype=float)
+                else:
+                    points = extract_points(mask, settings, self.backend)
+                item = Series(
+                    name=candidate.name,
+                    color=candidate.color_rgb,
+                    settings=settings,
+                    pixel_points=points,
+                    data_points=np.empty((0, 2), dtype=float),
+                    mask=mask,
+                    style=style,
+                    display=shade,
+                )
+                item.recompute_data(calibration)
+                series.append(item)
+        for position, item in enumerate(series):
+            item.name = f"Series {position + 1}"
         return series
 
     # -- entry point -------------------------------------------------------------
@@ -206,7 +278,7 @@ class AutoDigitizer:
             inward_reach_x=_inward_reach(x_ticks),
             inward_reach_y=_inward_reach(y_ticks),
         )
-        series = self._build_series(content, calibration)
+        series = self._build_series(content, calibration, frame)
         if not series:
             warnings.append("No data series found inside the plot area")
 
