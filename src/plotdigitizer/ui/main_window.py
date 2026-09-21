@@ -38,14 +38,14 @@ from PySide6.QtWidgets import (
 from ..backend import describe_devices, select_backend
 from ..calibration import Calibration
 from ..compose import combine_series, split_series
-from ..detect.extract import ExtractionMode, ExtractionSettings
+from ..detect.extract import ExtractionMode, ExtractionSettings, thin_points
 from ..detect.frame import analyse_ink
 from ..detect.outliers import select_outliers
 from ..detect.snap import snap_to_ink
 from ..detect.trace import stroke_mask, sweep_along, trace_stroke
 from ..export import csv_string, read_csv_series, write_csv
 from ..image_io import SUPPORTED_SUFFIXES, file_dialog_filter, load_image
-from ..pipeline import DigitizationResult, Series
+from ..pipeline import DigitizationResult, Series, distinct_colour
 from ..project import PROJECT_SUFFIX, load_project, save_project
 from .canvas import PlotCanvas, qimage_to_numpy
 from .magnifier import Magnifier
@@ -90,6 +90,9 @@ class MainWindow(QMainWindow):
         self._worker: DigitizeWorker | None = None
         self._ink = None                 # InkImage, for snapping and stroke tracing
         self._dirty = False
+        #: The series came from an opened session: work that re-detecting would replace,
+        #: even though nothing has been edited since it was opened.
+        self._from_session = False
         self._snap_enabled = True
         self._selection: set[int] = set()
         self._extractor = ExtractionWorker(self._backend, self)
@@ -517,39 +520,59 @@ class MainWindow(QMainWindow):
         self._undo.clear()
         self._redo.clear()
         self._set_dirty(False)
+        self._from_session = False
         # Kept for snapping and stroke tracing; a single pass over the image.
         self._ink = analyse_ink(image)
         self.canvas.set_image(image)
         self.magnifier.set_image(image)
         self.setWindowTitle(f"Plot Digitizer - {path.name if path else 'pasted image'}")
 
+    def _new_series_colour(self) -> tuple[int, int, int]:
+        """A colour for a series made by hand, unlike any already on screen."""
+        shown = [s.display_color for s in self._result.series] if self._result else []
+        return distinct_colour(shown, NEW_SERIES_PALETTE, start=len(shown))
+
+    def _detecting(self) -> bool:
+        return self._worker is not None and self._worker.isRunning()
+
     def auto_digitize(self) -> None:
-        if self._image is None or (self._worker is not None and self._worker.isRunning()):
+        if self._image is None or self._detecting():
             return
         if not self._confirm_replace_manual_work():
             return
+        self._start_detection()
+
+    def _start_detection(self) -> None:
         self.progress.show()
         self.statusBar().showMessage("Detecting axes and data...")
-        self.action_auto.setEnabled(False)
-
         self._worker = DigitizeWorker(self._image, self._device,
                                       separate=self.action_separate.isChecked())
         self._worker.finished_ok.connect(self._on_digitized)
         self._worker.failed.connect(self._on_digitize_failed)
-        self._worker.finished.connect(lambda: (self.progress.hide(),
-                                               self.action_auto.setEnabled(True)))
+        self._worker.finished.connect(self._on_detection_finished)
         self._worker.start()
+        self._update_actions()
+
+    def _on_detection_finished(self) -> None:
+        self.progress.hide()
+        self._update_actions()
 
     def _set_separate(self, on: bool) -> None:
+        # Changing the option re-runs detection at once, so the effect is visible; if
+        # that is declined, the option goes back to what the series on screen used.
+        if self._image is not None and (self._detecting()
+                                        or not self._confirm_replace_manual_work()):
+            self.action_separate.blockSignals(True)
+            self.action_separate.setChecked(not on)
+            self.action_separate.blockSignals(False)
+            return
         self._settings().setValue("detect/separate", bool(on))
         if self._image is None:
             return
         self.statusBar().showMessage(
             "Splitting series that share a colour." if on
             else "Keeping each colour as one series.", 5000)
-        # Re-run at once so the effect is visible. It asks first if there is manual
-        # work to lose, and like any detection it can be undone.
-        self.auto_digitize()
+        self._start_detection()
 
     def _on_digitize_failed(self, message: str) -> None:
         QMessageBox.critical(self, "Automatic digitization failed", message)
@@ -562,11 +585,16 @@ class MainWindow(QMainWindow):
         if self._result is not None:
             self._push_undo()
         self._result = result
+        self._from_session = False
         self._active = 0
         self._sync_all()
 
         summary = (f"Found {len(result.series)} series, {result.total_points} points "
                    f"in {result.elapsed_seconds:.2f}s on {result.device.upper()}.")
+        if not self.action_separate.isChecked():
+            # The option is remembered between sessions; say when it is off, since a
+            # figure whose series share a colour then comes back as one series.
+            summary += " Series sharing a colour were not split (turned off)."
         self.statusBar().showMessage(summary, 10000)
         if result.warnings:
             self.tabs.setCurrentIndex(0)
@@ -644,7 +672,10 @@ class MainWindow(QMainWindow):
     def _update_actions(self) -> None:
         has_result = self._result is not None
         self.action_export.setEnabled(has_result)
-        self.action_auto.setEnabled(self._image is not None)
+        # Neither may start a second detection while one is running.
+        idle = not self._detecting()
+        self.action_auto.setEnabled(self._image is not None and idle)
+        self.action_separate.setEnabled(idle)
         self.action_undo.setEnabled(bool(self._undo))
         self.action_redo.setEnabled(bool(self._redo))
 
@@ -721,6 +752,8 @@ class MainWindow(QMainWindow):
                     "sources": copy.deepcopy(s.sources),
                     "style": s.style,
                     "display": s.display,
+                    "found": s.found,
+                    "found_mode": s.found_mode,
                 }
                 for s in self._result.series
             ],
@@ -752,6 +785,8 @@ class MainWindow(QMainWindow):
             series.sources = copy.deepcopy(entry.get("sources"))
             series.style = entry.get("style", "")
             series.display = entry.get("display")
+            series.found = entry.get("found")
+            series.found_mode = entry.get("found_mode")
         self._active = snapshot["active"]
         # Point indices have just been rewritten wholesale, so any selection held
         # against the old ones is meaningless - and a selection pointing at the wrong
@@ -812,7 +847,7 @@ class MainWindow(QMainWindow):
 
     def _confirm_replace_manual_work(self) -> bool:
         """Re-running detection replaces every series; say so when that costs something."""
-        if not self._dirty or self._result is None:
+        if (not self._dirty and not self._from_session) or self._result is None:
             return True
         answer = QMessageBox.question(
             self, "Re-detect from scratch?",
@@ -980,7 +1015,7 @@ class MainWindow(QMainWindow):
         if target_index < 0:
             target = Series(
                 name=f"Series {len(self._result.series) + 1}",
-                color=NEW_SERIES_PALETTE[len(self._result.series) % len(NEW_SERIES_PALETTE)],
+                color=self._new_series_colour(),
                 settings=source.settings.copy(),
                 pixel_points=np.empty((0, 2), dtype=float),
                 data_points=np.empty((0, 2), dtype=float),
@@ -1044,7 +1079,7 @@ class MainWindow(QMainWindow):
         self._push_undo()
         series = Series(
             name=f"Series {len(self._result.series) + 1}",
-            color=NEW_SERIES_PALETTE[len(self._result.series) % len(NEW_SERIES_PALETTE)],
+            color=self._new_series_colour(),
             settings=ExtractionSettings(mode=ExtractionMode.CURVE),
             pixel_points=points,
             data_points=np.empty((0, 2), dtype=float),
@@ -1157,6 +1192,11 @@ class MainWindow(QMainWindow):
                 "This series was created by hand, so there is nothing to re-extract.", 4000)
             return
         self._push_undo(coalesce=f"settings:{index}")
+        if series.found is not None and settings.mode is series.found_mode:
+            # The separator's own points are better than a fresh read of the mask; a
+            # new spacing or limit thins them, and going back restores them.
+            self._on_reextracted(index, thin_points(series.found, settings))
+            return
         self.statusBar().showMessage(f"Re-extracting {series.name}...", 2000)
         self._extractor.request(index, series.mask, settings)
 
@@ -1206,7 +1246,7 @@ class MainWindow(QMainWindow):
         index = len(self._result.series)
         series = Series(
             name=f"Segment {self._segment_counter()}",
-            color=NEW_SERIES_PALETTE[index % len(NEW_SERIES_PALETTE)],
+            color=self._new_series_colour(),
             settings=ExtractionSettings(mode=ExtractionMode.CURVE),
             pixel_points=points,
             data_points=np.empty((0, 2), dtype=float),
@@ -1232,7 +1272,7 @@ class MainWindow(QMainWindow):
         self._push_undo()
         self._result.series.append(Series(
             name=f"Series {len(self._result.series) + 1}",
-            color=NEW_SERIES_PALETTE[len(self._result.series) % len(NEW_SERIES_PALETTE)],
+            color=self._new_series_colour(),
             settings=ExtractionSettings(),
             pixel_points=np.empty((0, 2), dtype=float),
             data_points=np.empty((0, 2), dtype=float),
@@ -1446,6 +1486,7 @@ class MainWindow(QMainWindow):
                                 f"The session refers to {image_path}, which is missing. "
                                 f"The points and calibration were loaded without it.")
         self._result = result
+        self._from_session = True
         self._active = 0
         self._undo.clear()
         self._redo.clear()

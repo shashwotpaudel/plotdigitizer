@@ -1000,12 +1000,63 @@ class TestSeriesSharingAColour:
 
     def test_option_is_remembered_and_reruns_detection(self, styles_window, monkeypatch):
         calls = []
-        monkeypatch.setattr(styles_window, "auto_digitize", lambda: calls.append(1))
+        monkeypatch.setattr(styles_window, "_start_detection", lambda: calls.append(1))
         styles_window.action_separate.setChecked(False)
         assert calls == [1]
         assert styles_window._settings().value("detect/separate", True, type=bool) is False
         styles_window.action_separate.setChecked(True)
         assert styles_window._settings().value("detect/separate", False, type=bool) is True
+
+    def test_declining_to_redetect_puts_the_option_back(self, styles_window, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+        calls = []
+        monkeypatch.setattr(styles_window, "_start_detection", lambda: calls.append(1))
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(
+            lambda *a, **k: QMessageBox.StandardButton.Cancel))
+        styles_window._settings().setValue("detect/separate", True)
+        styles_window._set_dirty(True)
+        styles_window.action_separate.setChecked(False)
+        assert calls == []
+        assert styles_window.action_separate.isChecked(), "the option matches the series shown"
+        assert styles_window._settings().value("detect/separate", False, type=bool) is True
+
+    def test_an_opened_session_is_not_replaced_without_asking(self, styles_window, tmp_path,
+                                                               monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+
+        from plotdigitizer.project import save_project
+        path = save_project(tmp_path / "s.pdproj", styles_window._result,
+                            styles_window._image_path)
+        styles_window.open_session(path)
+        asked = []
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(
+            lambda *a, **k: asked.append(1) or QMessageBox.StandardButton.Cancel))
+        monkeypatch.setattr(styles_window, "_start_detection", lambda: None)
+        styles_window.action_separate.setChecked(not styles_window.action_separate.isChecked())
+        assert asked == [1]
+
+    def test_the_option_waits_for_a_running_detection(self, styles_window, monkeypatch):
+        monkeypatch.setattr(styles_window, "_detecting", lambda: True)
+        styles_window._update_actions()
+        assert not styles_window.action_separate.isEnabled()
+        assert not styles_window.action_auto.isEnabled()
+
+    def test_changing_the_spacing_keeps_the_separators_points(self, styles_window):
+        series = styles_window._result.series[0]
+        found = series.pixel_points.copy()
+        settings = series.settings.copy()
+        settings.x_step = 2
+        styles_window._on_series_settings(0, settings)
+        assert 0.4 * len(found) <= series.count <= 0.6 * len(found)
+        settings = settings.copy()
+        settings.x_step = 1
+        styles_window._on_series_settings(0, settings)
+        np.testing.assert_array_equal(series.pixel_points, found)
+
+    def test_hand_made_series_get_a_colour_of_their_own(self, styles_window):
+        shown = [np.asarray(s.display_color, float) for s in styles_window._result.series]
+        new = np.asarray(styles_window._new_series_colour(), float)
+        assert min(np.linalg.norm(new - c) for c in shown) > 60
 
     def test_session_round_trip_keeps_style_and_colour(self, styles_window, tmp_path):
         from plotdigitizer.project import load_project, save_project
