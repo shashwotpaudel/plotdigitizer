@@ -21,9 +21,16 @@ markers* — and shown on the figure in a colour of its own, so you can see whic
 which. Its ink colour is still what is recorded.
 
 Check each against the figure. Where curves coincide, a series is left with a gap rather
-than a guess; where two lines in one style tangle, they can come out swapped. The two
-tools below are for putting that right, and for figures where you would rather do it by
-hand: turn the automatic split off from the arrow beside **Auto-digitize**.
+than a guess; where two lines in one style tangle, they can come out swapped. A line
+shorter than about a sixth of the plot's width is not kept at all. When a noticeable
+amount of ink ended up in no series, a warning at the end of detection gives the range
+of x to look at. The [FAQ](faq.md#curves-drawn-in-the-same-colour) lists what the split
+can and cannot tell apart.
+
+The two tools below are for putting that right, and for figures where you would rather
+do it by hand: turn the automatic split off from the arrow beside **Auto-digitize**. A
+missing short line can be traced on its own, and a curve that came back in two pieces
+can be put together with [Combine](#combining-segments).
 
 ### Trace stroke
 

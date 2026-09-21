@@ -53,6 +53,9 @@ Detection runs immediately. Within a second or so you should see:
 - coloured dots covering the data points it found
 - the **1 Calibrate** panel filled in, with a confidence badge
 
+If detection found something you should check — a weak axis fit, or ink it could not
+put into any series — a box lists it when detection finishes.
+
 ### 1. Check the calibration
 
 The panel on the right shows the values it read from the tick labels and the scale type

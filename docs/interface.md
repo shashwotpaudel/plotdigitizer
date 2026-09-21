@@ -13,7 +13,7 @@ magnifier that follows the cursor.
 |---|---|
 | **Open image** | Load a figure. <kbd>Ctrl</kbd>+<kbd>O</kbd> |
 | **Recent** | Files opened before |
-| **Auto-digitize** | Run detection again from scratch. <kbd>Ctrl</kbd>+<kbd>D</kbd>. The arrow beside it holds **Split series that share a colour**, on by default |
+| **Auto-digitize** | Run detection again from scratch. <kbd>Ctrl</kbd>+<kbd>D</kbd>. The arrow beside it holds **Split series that share a colour**, on by default. Changing it runs detection again, asking first if that would replace work you have done; the choice is remembered |
 | **Undo / Redo** | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> |
 | **Fit / 100%** | Zoom to the window, or to actual pixels |
 | **Snap** | Pull clicked points onto the centre of the nearest stroke |

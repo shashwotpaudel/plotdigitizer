@@ -25,10 +25,10 @@ non-zero exit status rather than quietly writing numbers it could not calibrate.
 | `--layout {combined,long,separate}` | How multiple series share the file. Default `combined` |
 | `--json` | Also write a `.json` holding the calibration and the points |
 | `--device {auto,cpu,cuda}` | Compute device. Default `auto`, which uses a GPU when one is usable |
-| `--max-series N` | Upper bound on how many series to separate. Default 8 |
+| `--max-series N` | Upper bound on how many series to return, counting those split from one colour. A colour whose split would go over it stays one series. Default 8 |
 | `--ocr {template,neural}` | Label reader. Default `template`, which needs no download |
 | `--colour-tolerance F` | How far a pixel may sit from a series colour, in Lab units. Default 28 |
-| `--no-separate` | Keep each colour as one series, instead of splitting series that share a colour by line style, marker shape and continuity |
+| `--no-separate` | Keep each colour as one series, as v0 did, instead of splitting series that share a colour by line style, marker shape and continuity |
 | `--precision N` | Significant digits in the CSV. Default is full precision |
 | `--gui` | Open the image in the window instead of exporting |
 | `-q`, `--quiet` | Only report problems |
@@ -88,6 +88,24 @@ microphone.png  (602 ms on cpu)
 ```
 
 With `--json`, each series in the JSON carries the same description as `style`.
+
+Anything that needs checking is logged after the figure's summary, and is still shown
+with `-q`. When a split leaves some of a colour's ink in no series, the warning says
+where:
+
+```
+short_curve.png  (360 ms on cpu)
+  frame      : x 80.0..576.0, y 58.0..427.0 (confidence 1.00)
+  x axis     : 0.00288846 .. 9.99711  [linear] (confidence 0.98)
+  y axis     : -0.00643292 .. 9.9974  [linear] (confidence 0.97)
+  Series 1  :  493 points  #020202  curve    x 0.04319..9.957  (solid line)
+  Series 2  :  493 points  #020202  curve    x 0.04319..9.957  (solid line)
+  -> out/short_curve.csv
+WARNING: short_curve.png: Some #020202 ink between x = 0.06334 and 1.272 is in none of the series found in it; check that stretch against the figure
+```
+
+That figure has three curves. The third leaves through the top of the plot at x = 1.3,
+which is too short to be kept as a series.
 
 The confidences are worth reading. Anything below about 0.5 on an axis means the fit was
 loose and the figure deserves a look in the window.
