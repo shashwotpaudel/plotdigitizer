@@ -13,8 +13,8 @@ The simplest route on Linux. Download it from the
 executable, and run it — there is nothing to install and nothing to uninstall.
 
 ```bash
-chmod +x plotdigitizer-v0-x86_64.AppImage
-./plotdigitizer-v0-x86_64.AppImage
+chmod +x plotdigitizer-v1.1-x86_64.AppImage
+./plotdigitizer-v1.1-x86_64.AppImage
 ```
 
 It needs glibc 2.28 or newer — Debian 10, Ubuntu 18.10, RHEL 8, Fedora 29 and later.
@@ -53,6 +53,9 @@ Detection runs immediately. Within a second or so you should see:
 - coloured dots covering the data points it found
 - the **1 Calibrate** panel filled in, with a confidence badge
 
+If detection found something you should check — a weak axis fit, or ink it could not
+put into any series — a box lists it when detection finishes.
+
 ### 1. Check the calibration
 
 The panel on the right shows the values it read from the tick labels and the scale type
@@ -70,7 +73,9 @@ read the axes and you should enter all four values yourself.
 ### 2. Check the curves
 
 Open **2 Series**. Each curve it separated is listed with its colour and point count.
-Click one to make it active; its points are the ones you can edit.
+Where several curves share a colour — a black-and-white figure — each is also labelled
+with how it is drawn and shown in a colour of its own. Click one to make it active; its
+points are the ones you can edit.
 
 If a curve was traced as a line when it is really a scatter — or the reverse — change
 **Mode** and it re-extracts immediately.

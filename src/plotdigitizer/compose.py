@@ -34,6 +34,8 @@ def series_to_source(series: Series) -> dict:
         # A source may itself have been a combine; keeping its provenance lets a stack
         # of combines be unwound one layer at a time instead of collapsing at the first.
         "sources": copy.deepcopy(series.sources),
+        "style": series.style,
+        "display": tuple(series.display) if series.display else None,
     }
 
 
@@ -55,6 +57,8 @@ def source_to_series(source: dict, calibration=None) -> Series:
         data_points=np.empty((0, 2), dtype=float),
         visible=bool(source.get("visible", True)),
         sources=copy.deepcopy(source.get("sources")),
+        style=source.get("style", ""),
+        display=tuple(source["display"]) if source.get("display") else None,
     )
     series.recompute_data(calibration)
     return series
@@ -89,6 +93,11 @@ def combine_series(members: list[Series], name: str | None = None,
         data_points=np.empty((0, 2), dtype=float),
         visible=True,
         sources=[series_to_source(s) for s in members] if keep_sources else None,
+        # One style only if every piece shares it: a solid line combined with a dotted
+        # one is not a solid line any more.
+        style=members[0].style if len({s.style for s in members}) == 1 else "",
+        # An explicitly chosen colour is the colour; otherwise keep the first member's.
+        display=None if color else members[0].display,
     )
     combined.recompute_data(calibration)
     return combined

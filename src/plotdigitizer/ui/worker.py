@@ -32,17 +32,20 @@ class DigitizeWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, image: np.ndarray, device: str = "auto",
-                 max_series: int = 8, colour_tolerance: float = 28.0, parent=None):
+                 max_series: int = 8, colour_tolerance: float = 28.0,
+                 separate: bool = True, parent=None):
         super().__init__(parent)
         self._image = image
         self._device = device
         self._max_series = max_series
         self._colour_tolerance = colour_tolerance
+        self._separate = separate
 
     def run(self) -> None:
         try:
             digitizer = AutoDigitizer(device=self._device, max_series=self._max_series,
-                                      colour_tolerance=self._colour_tolerance)
+                                      colour_tolerance=self._colour_tolerance,
+                                      separate=self._separate)
             result: DigitizationResult = digitizer.run(self._image)
         except Exception as exc:                        # noqa: BLE001 - reported to the UI
             log.exception("automatic digitization failed")

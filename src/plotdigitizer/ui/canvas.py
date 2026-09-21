@@ -156,7 +156,7 @@ class PlotCanvas(QGraphicsView):
             self._series_items.append(item)
 
         for index, (item, series) in enumerate(zip(self._series_items, series_list)):
-            item.set_colour(QColor(*series.color))
+            item.set_colour(QColor(*series.display_color))
             item.set_points(series.pixel_points)
             item.setVisible(series.visible and self._show_points)
             item.set_active(index == self._active_series)

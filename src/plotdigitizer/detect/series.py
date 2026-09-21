@@ -77,6 +77,38 @@ def _interior_mask(ink: InkImage, frame: PlotFrame, inset: int = 2) -> np.ndarra
     return mask
 
 
+def _spine_inset(ink: InkImage, frame: PlotFrame, least: int = 2, most: int = 12) -> int:
+    """How far inside the frame lines the data starts: past the spines' own width.
+
+    Two pixels clears a spine at ordinary resolutions. From about 300 dpi a default
+    spine is three or more pixels wide, and its inner rows would be left inside the plot
+    as a full-width line in the axis colour - which, in a black figure, is the data's
+    colour too. So each spine is measured, across the middle of its length, from the
+    frame line inwards.
+    """
+    height, width = ink.shape
+    mask = ink.mask
+    extents = []
+    sides = (("top", frame.top, 1), ("bottom", frame.bottom, -1),
+             ("left", frame.left, 1), ("right", frame.right, -1))
+    for side, position, inward in sides:
+        centre = int(round(position))
+        along = (np.linspace(frame.left, frame.right, 41)[5:-5] if side in ("top", "bottom")
+                 else np.linspace(frame.top, frame.bottom, 41)[5:-5])
+        reach = []
+        for a in np.round(along).astype(int):
+            depth = 0
+            for step in range(most + 1):
+                r, c = ((centre + inward * step, a) if side in ("top", "bottom")
+                        else (a, centre + inward * step))
+                if not (0 <= r < height and 0 <= c < width) or not mask[r, c]:
+                    break
+                depth = step
+            reach.append(depth)
+        extents.append(float(np.median(reach)) if reach else 0.0)
+    return int(np.clip(max(extents) + 1, least, most))
+
+
 def _clear_inward_ticks(mask: np.ndarray, frame: PlotFrame,
                         x_ticks: np.ndarray, y_ticks: np.ndarray,
                         reach_x: int, reach_y: int, half_width: int = 3) -> None:
@@ -211,6 +243,153 @@ def _is_blend(colour: np.ndarray, parent_colour: np.ndarray, background: np.ndar
     return float(np.linalg.norm((colour - background) - alpha * axis)) <= tolerance
 
 
+def _add_missed_colours(lab: np.ndarray, mask: np.ndarray, coords: np.ndarray,
+                        within: np.ndarray, centres: np.ndarray,
+                        tolerance: float, max_series: int) -> np.ndarray:
+    """Find a series too pale to have seeded a colour of its own.
+
+    Colours are seeded from the darker ink, so that the pale edges of lines cannot
+    start clusters of their own. The price is that a genuinely pale series - a light
+    grey line in a figure that also has black ones - is never seeded, and its ink is
+    simply dropped. It can be told from an edge by where it is: an anti-aliased edge
+    always touches the line it belongs to, whereas a separate line keeps its distance.
+    So ink that no colour claimed, and that touches nothing that was claimed, is
+    clustered on its own; if enough of it shares a colour, that is a series.
+
+    Only strokes count. A shaded band, a highlighted span or a watermark is pale ink that
+    no darker ink seeded either, but it is an area, not a line, and a colour seeded from
+    it would go on to claim the edges of every line drawn across it.
+    """
+    if centres.shape[0] >= max_series:
+        return centres
+    claimed = np.zeros(mask.shape, dtype=bool)
+    claimed[coords[within, 0], coords[within, 1]] = True
+    near = cv2.dilate(claimed.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    stray = mask & ~near
+    total = float(mask.sum())
+    if stray.sum() < max(40, MIN_CLUSTER_FRACTION * total):
+        return centres
+    # It should be strokes, not a scatter of specks left by compression, and not areas.
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(stray.astype(np.uint8), 8)
+    if count <= 1:
+        return centres
+    core = cv2.erode(stray.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    solid = np.bincount(labels[core], minlength=count)
+    area = stats[:, cv2.CC_STAT_AREA]
+    strokes = (area >= 20) & (solid < 0.1 * area)
+    # Nor straight upright or level runs: a legend's frame or a light grid, which after
+    # compression is too broken to be recognised as structure, is still not a series.
+    closed = cv2.morphologyEx(stray.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    run = max(20, int(0.06 * min(mask.shape)))
+    straight = (cv2.morphologyEx(closed, cv2.MORPH_OPEN, np.ones((1, run), np.uint8))
+                | cv2.morphologyEx(closed, cv2.MORPH_OPEN, np.ones((run, 1), np.uint8)))
+    straight = cv2.dilate(straight, np.ones((3, 3), np.uint8)).astype(bool)
+    strokes &= np.bincount(labels[stray & straight], minlength=count) < 0.6 * area
+    strokes[0] = False
+    if not strokes.any():
+        return centres
+    stray &= strokes[labels]
+    if stray.sum() < max(40, MIN_CLUSTER_FRACTION * total):
+        return centres
+    samples = lab[stray]
+    extra = [seed for seed in _peak_colours(samples, max_series - centres.shape[0])
+             if np.linalg.norm(centres - seed, axis=1).min() > tolerance]
+    if not extra:
+        return centres
+    log.debug("adding %d pale colour(s) no darker ink seeded", len(extra))
+    return np.vstack([centres, np.asarray(extra, dtype=centres.dtype)])
+
+
+def _return_fringes(candidates: list[SeriesCandidate], background: np.ndarray) -> None:
+    """Give a darker series back the fringe that was filed under a lighter one.
+
+    When one series' colour is a blend of another's with the paper - grey beside black,
+    pale blue beside navy - the darker line's anti-aliased edge is exactly that lighter
+    colour, and is assigned to the lighter series. It then trails the dark line as a
+    ghost. Pieces of the lighter colour that lie wholly along the darker series, never
+    more than a couple of pixels from it, and only a pixel wide, are its fringe and go
+    back to it. A lighter series of its own extends away from the darker one - it
+    crosses it, or runs beside it at a distance - and its strokes are wider than a
+    pixel, so it keeps its pieces.
+
+    A lighter colour that turns out to be mostly fringe was never a series: it was the
+    outer edge of a darker line, tinted just differently enough to be clustered on its
+    own, and what is left of it goes to the line it gave most of itself to.
+    """
+    background = np.asarray(background, dtype=float)
+    before = {id(c): c.pixel_count for c in candidates}
+    given: dict[int, dict[int, int]] = {}
+    for dark in candidates:
+        dark_colour = np.array(dark.color_rgb, dtype=float)
+        near = None
+        for light in candidates:
+            if light is dark:
+                continue
+            if not _is_blend(np.array(light.color_rgb, dtype=float), dark_colour, background):
+                continue
+            if near is None:
+                near = cv2.dilate(dark.mask.astype(np.uint8),
+                                  np.ones((5, 5), np.uint8)).astype(bool)
+            count, labels, stats, _ = cv2.connectedComponentsWithStats(
+                light.mask.astype(np.uint8), connectivity=8)
+            if count <= 1:
+                continue
+            outside = np.bincount(labels[light.mask & ~near], minlength=count)
+            # An edge is a trail one pixel wide; a stretch of a pale line of its own,
+            # cut short where the darker curve was drawn over it, is as wide as its
+            # stroke.
+            length = np.maximum(stats[:, cv2.CC_STAT_WIDTH], stats[:, cv2.CC_STAT_HEIGHT])
+            along = (outside == 0) & (stats[:, cv2.CC_STAT_AREA] <= 1.4 * length)
+            along[0] = False
+            fringe = along[labels] & light.mask
+            if fringe.any():
+                light.mask &= ~fringe
+                light.pixel_count = int(light.mask.sum())
+                dark.mask |= fringe
+                dark.pixel_count = int(dark.mask.sum())
+                given.setdefault(id(light), {})[id(dark)] = int(fringe.sum())
+    by_id = {id(c): c for c in candidates}
+    for key, receivers in given.items():
+        light = by_id[key]
+        if sum(receivers.values()) >= 0.75 * before[key] and light.pixel_count:
+            dark = by_id[max(receivers, key=receivers.get)]
+            dark.mask |= light.mask
+            dark.pixel_count = int(dark.mask.sum())
+            light.mask = np.zeros_like(light.mask)
+            light.pixel_count = 0
+
+
+def _between(colour: np.ndarray, a: np.ndarray, b: np.ndarray, tolerance: float = 25.0) -> bool:
+    """Is a colour a mix of two others - on the line from one to the other, not at its ends?"""
+    axis = b - a
+    length_sq = float(axis @ axis)
+    if length_sq < 1e-6:
+        return False
+    t = float((colour - a) @ axis / length_sq)
+    if not (0.1 < t < 0.9):
+        return False
+    return float(np.linalg.norm((colour - a) - t * axis)) <= tolerance
+
+
+def _is_thin(mask: np.ndarray) -> bool:
+    """Is this ink strokes a pixel or two wide, with nothing solid about it?"""
+    count = int(mask.sum())
+    if count == 0:
+        return False
+    core = cv2.erode(mask.astype(np.uint8), np.ones((3, 3), np.uint8))
+    return int(core.sum()) <= 0.1 * count
+
+
+def _alongside(mask: np.ndarray, other: np.ndarray, reach: int = 3) -> float:
+    """Fraction of ``mask`` with ``other``'s ink in the same column, within a few rows."""
+    count = int(mask.sum())
+    if count == 0:
+        return 0.0
+    column = cv2.dilate(other.astype(np.uint8),
+                        np.ones((2 * reach + 1, 1), np.uint8)).astype(bool)
+    return float((mask & column).sum()) / count
+
+
 def _blob_boxes(mask: np.ndarray) -> tuple[list[tuple[int, int, int, int]], np.ndarray]:
     count, _, stats, centroids = cv2.connectedComponentsWithStats(
         mask.astype(np.uint8), connectivity=8)
@@ -232,8 +411,8 @@ def _encloses(parent_boxes, centroids: np.ndarray) -> float:
     return inside / float(centroids.shape[0])
 
 
-def _merge_marker_parts(candidates: list[SeriesCandidate], background: np.ndarray
-                        ) -> list[SeriesCandidate]:
+def _merge_marker_parts(candidates: list[SeriesCandidate], background: np.ndarray,
+                        thin: bool = True) -> list[SeriesCandidate]:
     """Fold the extra colour clusters one drawn series produces back into it.
 
     A single series routinely paints more than one colour:
@@ -252,6 +431,9 @@ def _merge_marker_parts(candidates: list[SeriesCandidate], background: np.ndarra
     blend of a dark blue and white, and merging two such series would silently destroy
     data. Requiring the pixels to hug - or to be enclosed by - the parent distinguishes
     "the fringe of that curve" from "a second, paler curve".
+
+    ``thin`` adds the rules for strokes about a pixel wide, whose anti-aliasing splits
+    whole stretches of one line into different greys.
     """
     if len(candidates) < 2:
         return candidates
@@ -260,6 +442,7 @@ def _merge_marker_parts(candidates: list[SeriesCandidate], background: np.ndarra
     merged: list[SeriesCandidate] = []
     background = np.asarray(background, dtype=float)
     neighbourhoods: dict[int, np.ndarray] = {}
+    wide: dict[int, np.ndarray] = {}
     boxes: dict[int, list] = {}
 
     for candidate in ordered:
@@ -277,6 +460,10 @@ def _merge_marker_parts(candidates: list[SeriesCandidate], background: np.ndarra
             touching = float((candidate.mask & neighbourhoods[key]).sum()) / max(
                 1, candidate.pixel_count)
             parent_colour = np.array(parent.color_rgb, dtype=float)
+            if key not in wide:
+                wide[key] = cv2.dilate(parent.mask.astype(np.uint8),
+                                       np.ones((9, 9), np.uint8)).astype(bool)
+            nearby = float((candidate.mask & wide[key]).sum()) / max(1, candidate.pixel_count)
 
             reason = None
             if touching >= 0.7 and _is_blend(colour, parent_colour, background):
@@ -287,8 +474,39 @@ def _merge_marker_parts(candidates: list[SeriesCandidate], background: np.ndarra
                 # never solid enough to have a fully-inked core for its edges to hug,
                 # so a monochrome figure splits into a fan of greys instead of one ink.
                 reason = "anti-aliasing"
-            elif touching >= 0.9 and candidate.pixel_count < 0.25 * parent.pixel_count:
-                # A thin skin of a third colour where two colours of one marker meet.
+            elif (thin and nearby >= 0.6 and _is_blend(colour, parent_colour, background)
+                  and _alongside(candidate.mask, parent.mask) <= 0.4
+                  and _is_thin(candidate.mask)):
+                # A line barely a pixel wide falls between pixel rows for whole dashes at
+                # a time, and those dashes come out entirely grey: no dark core for them
+                # to hug, only the rest of the same line a few pixels along. So a blend
+                # of the parent's ink that lies mostly within a few pixels of it is the
+                # same thin strokes - provided it continues the parent rather than runs
+                # beside it. Grey stretches of one line fill the columns where the dark
+                # stretches are not; a paler series drawn next to a darker one, raw data
+                # under its own smoothed curve, has ink in the same columns.
+                reason = "anti-aliasing (thin strokes)"
+            elif (thin and _is_blend(parent_colour, colour, background)
+                  and float((parent.mask & cv2.dilate(candidate.mask.astype(np.uint8),
+                                                      np.ones((9, 9), np.uint8)).astype(bool)
+                             ).sum()) >= 0.6 * parent.pixel_count
+                  and _alongside(parent.mask, candidate.mask) <= 0.4
+                  and _is_thin(parent.mask)):
+                # The same, the other way round: at low resolution the pale partial
+                # pixels of a thin line can outnumber its dark ones, so the larger
+                # cluster is the blend. It takes the darker colour, which is the ink.
+                reason = "anti-aliasing (thin strokes)"
+                parent.color_rgb = candidate.color_rgb
+                parent.color_lab = candidate.color_lab
+            elif (touching >= 0.9 and candidate.pixel_count < 0.25 * parent.pixel_count
+                  and not _is_blend(parent_colour, colour, background)
+                  and any(_between(colour, parent_colour, np.array(other.color_rgb, float))
+                          for other in ordered if other is not candidate and other is not parent)):
+                # A thin skin of a third colour where two colours of one marker meet: a
+                # mix of the parent's colour and another one. A series of its own that
+                # merely runs across a large pale area - a band, a watermark - touches it
+                # all along too, but its colour is no mix of the two; and where the parent
+                # is a paler shade of this colour, this is the darker ink's edge instead.
                 reason = "boundary fringe"
             elif (len(candidate_boxes) >= 3
                   and abs(len(candidate_boxes) - len(boxes[key])) <= 0.25 * max(
@@ -305,6 +523,7 @@ def _merge_marker_parts(candidates: list[SeriesCandidate], background: np.ndarra
             parent.mask |= candidate.mask
             parent.pixel_count = int(parent.mask.sum())
             neighbourhoods.pop(key, None)
+            wide.pop(key, None)
             boxes.pop(key, None)
             absorbed = True
             break
@@ -363,13 +582,21 @@ def discover_series(
     colour_tolerance: float = 28.0,
     inward_reach_x: int = 0,
     inward_reach_y: int = 0,
+    shared_ink: bool = True,
 ) -> PlotContent:
-    """Find the colour-separated data series inside the plot frame."""
+    """Find the colour-separated data series inside the plot frame.
+
+    ``shared_ink`` turns on three refinements for figures whose series share or nearly
+    share a colour: pale series that no darker ink seeded are looked for, thin strokes
+    whose anti-aliasing split them into several greys are joined up, and a pale series
+    hands back the fringe of a darker one. Without it, colours are separated exactly as
+    they were before series sharing a colour could be told apart.
+    """
     backend = backend or NumpyBackend()
     x_ticks = np.asarray(x_ticks if x_ticks is not None else [], dtype=float)
     y_ticks = np.asarray(y_ticks if y_ticks is not None else [], dtype=float)
 
-    mask = _interior_mask(ink, frame)
+    mask = _interior_mask(ink, frame, inset=_spine_inset(ink, frame))
     _clear_inward_ticks(mask, frame, x_ticks, y_ticks, inward_reach_x, inward_reach_y)
     legend_rect = detect_legend(ink, frame)
     if legend_rect is not None:
@@ -404,6 +631,14 @@ def discover_series(
     labels, distances = backend.nearest_center(pixels, centres)
     within = distances <= colour_tolerance
 
+    if shared_ink:
+        extra = _add_missed_colours(lab, mask, coords, within, centres, colour_tolerance,
+                                    max_series)
+        if extra.shape[0] > centres.shape[0]:
+            centres = extra
+            labels, distances = backend.nearest_center(pixels, centres)
+            within = distances <= colour_tolerance
+
     total_ink = float(mask.sum())
     for index in range(centres.shape[0]):
         selected = (labels == index) & within
@@ -432,7 +667,13 @@ def discover_series(
         else:
             content.series.append(candidate)
 
-    content.series = _merge_marker_parts(content.series, ink.background)
+    content.series = _merge_marker_parts(content.series, ink.background, thin=shared_ink)
+    if shared_ink:
+        # Only once the anti-aliased tints have been folded back into their lines: what
+        # is left are real series, and a pale one may still hold a darker one's edge.
+        _return_fringes(content.series, ink.background)
+        content.series = [c for c in content.series
+                          if c.pixel_count >= max(12, MIN_CLUSTER_FRACTION * total_ink)]
     content.series.sort(key=lambda s: s.pixel_count, reverse=True)
     for position, series in enumerate(content.series):
         series.index = position

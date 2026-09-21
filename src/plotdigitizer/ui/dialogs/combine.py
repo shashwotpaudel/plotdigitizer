@@ -45,8 +45,10 @@ class CombineDialog(QDialog):
 
         self._list = QListWidget()
         for index, series in enumerate(self._series):
-            item = QListWidgetItem(_swatch(series.color),
-                                   f"{series.name}  ({series.count} pts)")
+            label = f"{series.name}  ({series.count} pts)"
+            if series.style:
+                label += f"  - {series.style}"
+            item = QListWidgetItem(_swatch(series.display_color), label)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if index in preselected
                                else Qt.CheckState.Unchecked)

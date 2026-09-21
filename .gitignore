@@ -15,6 +15,9 @@ venv/
 # build output rather than source.
 tests/data/
 tests/holdout/
+tests/samecolour/
+tests/samecolour_holdout/
+tests/hard/
 
 # AppImage build output
 packaging/build/

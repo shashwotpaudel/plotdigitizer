@@ -13,7 +13,7 @@ magnifier that follows the cursor.
 |---|---|
 | **Open image** | Load a figure. <kbd>Ctrl</kbd>+<kbd>O</kbd> |
 | **Recent** | Files opened before |
-| **Auto-digitize** | Run detection again from scratch. <kbd>Ctrl</kbd>+<kbd>D</kbd> |
+| **Auto-digitize** | Run detection again from scratch. <kbd>Ctrl</kbd>+<kbd>D</kbd>. The arrow beside it holds **Split series that share a colour**, on by default. Changing it runs detection again, asking first if that would replace work you have done; the choice is remembered |
 | **Undo / Redo** | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> |
 | **Fit / 100%** | Zoom to the window, or to actual pixels |
 | **Snap** | Pull clicked points onto the centre of the nearest stroke |
@@ -77,8 +77,11 @@ runs the whole detection again, and asks first if you have made manual correctio
 
 ## Panel 2 — Series
 
-Lists every curve found, with its colour, name and point count. Click one to make it
-active. Double-click to rename it. Untick it to hide it and leave it out of the export.
+Lists every curve found, with its colour, name and point count. Where several were told
+apart within one colour, each also says how it is drawn — *dashed line*, *filled square
+markers* — and is shown in a colour of its own rather than all in the same black. Click
+one to make it active. Double-click to rename it. Untick it to hide it and leave it out
+of the export.
 
 **Extraction** re-reads the active series from the image:
 

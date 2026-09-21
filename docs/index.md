@@ -14,7 +14,8 @@ This tool does that part for you. Open a figure and it works out, unaided:
 - where the plot area is, even in styles that draw no axis lines at all
 - what the tick labels say, including `10ⁿ` powers and `1e-3` multipliers
 - whether each axis is linear, logarithmic, reciprocal or a date
-- which curves are present, and where their points lie
+- which curves are present — told apart by colour, and where colour does not help, by
+  marker shape, line style and continuity — and where their points lie
 
 You are left with the job you actually want: checking the result and correcting anything
 it got wrong, then exporting a CSV.
@@ -34,10 +35,11 @@ it got wrong, then exporting a CSV.
 ## What it is not
 
 It reads 2D line and scatter plots. It does not read bar charts, pie charts, polar or
-ternary plots, or three-dimensional figures. Curves are told apart by colour, so several
-curves drawn in the same colour arrive merged — there are
-[tools for separating them](workflows.md#black-and-white-figures), but where curves
-genuinely overlap the information is not in the image to recover.
+ternary plots, or three-dimensional figures. Curves drawn in one colour are told apart by
+their style, but two drawn identically — the same marker, or the same line style lying
+on top of each other — cannot be, and where curves genuinely overlap the information is
+not in the image to recover. There are
+[tools for sorting out what the automatic pass could not](workflows.md#black-and-white-figures).
 
 The [FAQ](faq.md#limitations) sets out the limits in full. They are worth reading before
 you trust a number.

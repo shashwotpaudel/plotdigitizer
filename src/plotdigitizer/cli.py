@@ -43,6 +43,7 @@ def _describe(result: DigitizationResult) -> str:
             f"  {series.name:10s}: {series.count:4d} points  {series.hex_color}  "
             f"{series.settings.mode.value:7s}  "
             f"x {first[0]:.4g}..{last[0]:.4g}"
+            + (f"  ({series.style})" if series.style else "")
         )
     return "\n".join(lines)
 
@@ -80,13 +81,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"],
                         help="compute device (default: auto - GPU when one is usable)")
     parser.add_argument("--max-series", type=int, default=8,
-                        help="upper bound on how many series to separate (default: 8)")
+                        help="upper bound on how many series to return, counting those "
+                             "split from one colour (default: 8)")
     parser.add_argument("--ocr", default="template", choices=["template", "neural"],
                         help="label reader: 'template' needs no download and is the "
                              "default; 'neural' downloads a PP-OCR model once, for "
                              "scanned or unusual figures")
     parser.add_argument("--colour-tolerance", type=float, default=28.0,
                         help="how far a pixel may sit from a series colour, in Lab units")
+    parser.add_argument("--no-separate", action="store_true",
+                        help="keep each colour as one series, instead of splitting series "
+                             "that share a colour by line style, marker shape and "
+                             "continuity")
     parser.add_argument("--precision", type=int, default=None,
                         help="significant digits in the CSV (default: full precision)")
     parser.add_argument("--gui", action="store_true",
@@ -122,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
 
     digitizer = AutoDigitizer(device=args.device, max_series=args.max_series,
                               colour_tolerance=args.colour_tolerance,
-                              ocr_engine=args.ocr)
+                              ocr_engine=args.ocr, separate=not args.no_separate)
     if not args.quiet:
         print(f"device: {digitizer.backend.describe()}")
 
@@ -143,10 +149,15 @@ def main(argv: list[str] | None = None) -> int:
 
         result = digitizer.run(image)
 
-        if args.output and len(images) == 1 and not Path(args.output).is_dir():
+        # A trailing slash says "directory" even when it does not exist yet; without
+        # this, `-o out/` on a single image wrote a file called "out".
+        wants_directory = bool(args.output) and (
+            Path(args.output).is_dir() or args.output.endswith(("/", "\\")))
+        if args.output and len(images) == 1 and not wants_directory:
             target = Path(args.output)
         else:
             directory = Path(args.output) if args.output else image_path.parent
+            directory.mkdir(parents=True, exist_ok=True)
             target = directory / f"{image_path.stem}.csv"
 
         written = write_csv(target, result.series, options)

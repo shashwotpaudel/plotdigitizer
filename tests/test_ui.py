@@ -947,3 +947,120 @@ class TestCanvasHelpers:
         target = points[4]
         assert item.nearest(target[0] + 1.0, target[1] + 1.0, 9.0) == 4
         assert item.nearest(target[0] + 500.0, target[1], 9.0) == -1
+
+
+class TestSeriesSharingAColour:
+    """Three black lines, told apart by style, must be told apart on screen too."""
+
+    @pytest.fixture
+    def styles_window(self, qapp):
+        import sys
+        from pathlib import Path
+
+        from plotdigitizer.image_io import load_image
+        from plotdigitizer.ui.main_window import MainWindow
+
+        root = Path(__file__).resolve().parents[1]
+        sys.path.insert(0, str(root / "tools"))
+        directory = root / "tests" / "samecolour"
+        if not (directory / "manifest.json").exists():
+            from make_samecolour import build
+            build(directory)
+        image = load_image(directory / "sc_styles.png")
+        win = MainWindow(device="cpu")
+        win._adopt_image(image, directory / "sc_styles.png")
+        win._on_digitized(AutoDigitizer(device="cpu").run(image))
+        yield win
+        win._set_dirty(False)
+        win.close()
+
+    def test_list_names_each_by_its_style(self, styles_window):
+        panel = styles_window.series_panel
+        labels = [panel._list.item(i).text() for i in range(panel._list.count())]
+        assert len(labels) == 3
+        for style in ("solid line", "dashed line", "dotted line"):
+            assert any(style in label for label in labels), labels
+
+    def test_each_is_drawn_in_its_own_colour(self, styles_window):
+        colours = {item._colour.name() for item in styles_window.canvas._series_items}
+        assert len(colours) == 3
+        assert "#000000" not in colours, "black points on black ink cannot be seen"
+
+    def test_summary_says_how_it_is_drawn(self, styles_window):
+        text = styles_window.series_panel._summary.text()
+        assert "line" in text and "ink #" in text
+
+    def test_undo_keeps_style_and_colour(self, styles_window):
+        before = [(s.style, s.display) for s in styles_window._result.series]
+        styles_window._push_undo()
+        for series in styles_window._result.series:
+            series.style, series.display = "", None
+        styles_window.undo()
+        assert [(s.style, s.display) for s in styles_window._result.series] == before
+
+    def test_option_is_remembered_and_reruns_detection(self, styles_window, monkeypatch):
+        calls = []
+        monkeypatch.setattr(styles_window, "_start_detection", lambda: calls.append(1))
+        styles_window.action_separate.setChecked(False)
+        assert calls == [1]
+        assert styles_window._settings().value("detect/separate", True, type=bool) is False
+        styles_window.action_separate.setChecked(True)
+        assert styles_window._settings().value("detect/separate", False, type=bool) is True
+
+    def test_declining_to_redetect_puts_the_option_back(self, styles_window, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+        calls = []
+        monkeypatch.setattr(styles_window, "_start_detection", lambda: calls.append(1))
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(
+            lambda *a, **k: QMessageBox.StandardButton.Cancel))
+        styles_window._settings().setValue("detect/separate", True)
+        styles_window._set_dirty(True)
+        styles_window.action_separate.setChecked(False)
+        assert calls == []
+        assert styles_window.action_separate.isChecked(), "the option matches the series shown"
+        assert styles_window._settings().value("detect/separate", False, type=bool) is True
+
+    def test_an_opened_session_is_not_replaced_without_asking(self, styles_window, tmp_path,
+                                                               monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+
+        from plotdigitizer.project import save_project
+        path = save_project(tmp_path / "s.pdproj", styles_window._result,
+                            styles_window._image_path)
+        styles_window.open_session(path)
+        asked = []
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(
+            lambda *a, **k: asked.append(1) or QMessageBox.StandardButton.Cancel))
+        monkeypatch.setattr(styles_window, "_start_detection", lambda: None)
+        styles_window.action_separate.setChecked(not styles_window.action_separate.isChecked())
+        assert asked == [1]
+
+    def test_the_option_waits_for_a_running_detection(self, styles_window, monkeypatch):
+        monkeypatch.setattr(styles_window, "_detecting", lambda: True)
+        styles_window._update_actions()
+        assert not styles_window.action_separate.isEnabled()
+        assert not styles_window.action_auto.isEnabled()
+
+    def test_changing_the_spacing_keeps_the_separators_points(self, styles_window):
+        series = styles_window._result.series[0]
+        found = series.pixel_points.copy()
+        settings = series.settings.copy()
+        settings.x_step = 2
+        styles_window._on_series_settings(0, settings)
+        assert 0.4 * len(found) <= series.count <= 0.6 * len(found)
+        settings = settings.copy()
+        settings.x_step = 1
+        styles_window._on_series_settings(0, settings)
+        np.testing.assert_array_equal(series.pixel_points, found)
+
+    def test_hand_made_series_get_a_colour_of_their_own(self, styles_window):
+        shown = [np.asarray(s.display_color, float) for s in styles_window._result.series]
+        new = np.asarray(styles_window._new_series_colour(), float)
+        assert min(np.linalg.norm(new - c) for c in shown) > 60
+
+    def test_session_round_trip_keeps_style_and_colour(self, styles_window, tmp_path):
+        from plotdigitizer.project import load_project, save_project
+        path = save_project(tmp_path / "s.pdproj", styles_window._result)
+        loaded, _ = load_project(path)
+        assert [(s.style, tuple(s.display)) for s in loaded.series] == \
+            [(s.style, tuple(s.display)) for s in styles_window._result.series]

@@ -242,3 +242,17 @@ class TestCLI:
         from plotdigitizer.cli import main
         assert main(["--devices", "x"]) == 0
         assert "selected:" in capsys.readouterr().out
+
+    def test_devices_needs_no_image(self, capsys):
+        from plotdigitizer.cli import main
+        assert main(["--devices"]) == 0
+        assert "selected:" in capsys.readouterr().out
+
+    def test_trailing_slash_means_a_directory(self, corpus, tmp_path):
+        """One image with ``-o out/`` used to write a file called "out"."""
+        from plotdigitizer.cli import main
+        target = tmp_path / "not-yet-there"
+        assert main([str(corpus["linear_scatter"].path), "-o", f"{target}/",
+                     "--device", "cpu", "-q"]) == 0
+        assert target.is_dir()
+        assert (target / "linear_scatter.csv").is_file()
