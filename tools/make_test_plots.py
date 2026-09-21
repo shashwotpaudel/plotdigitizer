@@ -24,6 +24,10 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
+# A personal matplotlibrc would otherwise reach everything drawn after the style
+# context in _new_fig closes - dash patterns, fonts, line widths - and the figures, and
+# the tests that read them, would differ from one machine to the next.
+matplotlib.rcdefaults()
 
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402

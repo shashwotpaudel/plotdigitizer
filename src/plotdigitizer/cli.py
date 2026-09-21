@@ -81,7 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"],
                         help="compute device (default: auto - GPU when one is usable)")
     parser.add_argument("--max-series", type=int, default=8,
-                        help="upper bound on how many series to separate (default: 8)")
+                        help="upper bound on how many series to return, counting those "
+                             "split from one colour (default: 8)")
     parser.add_argument("--ocr", default="template", choices=["template", "neural"],
                         help="label reader: 'template' needs no download and is the "
                              "default; 'neural' downloads a PP-OCR model once, for "

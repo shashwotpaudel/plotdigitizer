@@ -231,6 +231,20 @@ def _resample(points: np.ndarray, max_points: int) -> np.ndarray:
     return points[np.round(indices).astype(int)]
 
 
+def thin_points(points: np.ndarray, settings: ExtractionSettings) -> np.ndarray:
+    """Apply a series' spacing and point limit to points found some other way.
+
+    Series told apart within one colour come with points the separator worked out -
+    one per column along a curve, the centres of markers - which re-reading the mask
+    cannot always reproduce. Changing the spacing or the limit thins those instead.
+    """
+    points = np.asarray(points, dtype=float).reshape(-1, 2)
+    if settings.mode is ExtractionMode.CURVE and settings.x_step > 1 and points.size:
+        columns = np.round(points[:, 0]).astype(int)
+        points = points[(columns - columns.min()) % settings.x_step == 0]
+    return _resample(points, settings.max_points)
+
+
 def extract_points(mask: np.ndarray, settings: ExtractionSettings,
                    backend: Backend | None = None) -> np.ndarray:
     """Extract (column, row) pixel points from one series mask."""

@@ -25,7 +25,6 @@ Usage:  python tools/separation_report.py [--data tests/samecolour] [--device cp
 from __future__ import annotations
 
 import argparse
-import itertools
 import json
 import sys
 from dataclasses import dataclass
@@ -131,6 +130,59 @@ def _score_pair(curve: TruthCurve, points: np.ndarray) -> SeriesScore:
     return SeriesScore(curve.name, "", purity, coverage, error, int(points.shape[0]))
 
 
+def _best_pairing(table: np.ndarray) -> list[int | None]:
+    """Pair rows with columns, each at most once, for the greatest total.
+
+    The Hungarian method on the table padded square with zeros, so that a row can go
+    unpaired. Its cost grows with the cube of the series count, where trying every
+    pairing grows with its factorial and stalls at seven or eight series.
+    """
+    rows, cols = table.shape
+    n = max(rows, cols, 1)
+    cost = np.zeros((n, n))
+    cost[:rows, :cols] = table.max(initial=0.0) - table
+    if cols < n:
+        cost[:rows, cols:] = table.max(initial=0.0)   # unpaired: as bad as a zero score
+    # Kuhn-Munkres with potentials, 1-indexed as usually written.
+    u, v = np.zeros(n + 1), np.zeros(n + 1)
+    match, way = np.zeros(n + 1, dtype=int), np.zeros(n + 1, dtype=int)
+    for i in range(1, n + 1):
+        match[0], j0 = i, 0
+        minv = np.full(n + 1, np.inf)
+        used = np.zeros(n + 1, dtype=bool)
+        while True:
+            used[j0] = True
+            i0, delta, j1 = match[j0], np.inf, 0
+            for j in range(1, n + 1):
+                if not used[j]:
+                    current = cost[i0 - 1, j - 1] - u[i0] - v[j]
+                    if current < minv[j]:
+                        minv[j], way[j] = current, j0
+                    if minv[j] < delta:
+                        delta, j1 = minv[j], j
+            for j in range(n + 1):
+                if used[j]:
+                    u[match[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if match[j0] == 0:
+                break
+        while True:
+            j1 = way[j0]
+            match[j0] = match[j1]
+            j0 = j1
+            if j0 == 0:
+                break
+    pairing: list[int | None] = [None] * rows
+    for j in range(1, n + 1):
+        i = match[j] - 1
+        if i < rows and j - 1 < cols and table[i, j - 1] > 0:
+            pairing[i] = j - 1
+    return pairing
+
+
 def score_figure(record: dict, detected: list) -> list[SeriesScore]:
     """Pair truth with detection to maximise total purity, then score each pair.
 
@@ -148,24 +200,7 @@ def score_figure(record: dict, detected: list) -> list[SeriesScore]:
             # series that actually carries the curve.
             table[i, j] = score.purity * score.coverage
 
-    best_total, best_assignment = -1.0, None
-    slots = list(range(n_det)) + [None] * n_truth
-    if n_det <= 8:
-        for perm in itertools.permutations(slots, n_truth):
-            if len({p for p in perm if p is not None}) != sum(p is not None for p in perm):
-                continue
-            total = sum(table[i, j] for i, j in enumerate(perm) if j is not None)
-            if total > best_total:
-                best_total, best_assignment = total, perm
-    else:  # pragma: no cover - greedy fallback for very over-split results
-        taken: set[int] = set()
-        best_assignment = []
-        for i in range(n_truth):
-            options = [j for j in range(n_det) if j not in taken]
-            j = max(options, key=lambda k: table[i, k]) if options else None
-            if j is not None:
-                taken.add(j)
-            best_assignment.append(j)
+    best_assignment = _best_pairing(table[:, :n_det] if n_det else np.zeros((n_truth, 0)))
 
     scores = []
     for i, j in enumerate(best_assignment):
@@ -189,6 +224,15 @@ def main(argv=None) -> int:
     from plotdigitizer.pipeline import AutoDigitizer
 
     data_dir = Path(args.data)
+    if not (data_dir / "manifest.json").exists():
+        # The corpora are generated, not checked in; build the one asked for.
+        builders = {"samecolour": "make_samecolour", "samecolour_holdout":
+                    "make_samecolour_holdout", "hard": "make_hard_cases"}
+        if data_dir.name not in builders:
+            parser.error(f"{data_dir} has no manifest.json")
+        sys.path.insert(0, str(ROOT / "tools"))
+        print(f"generating {data_dir} ...")
+        __import__(builders[data_dir.name]).build(data_dir)
     manifest = json.loads((data_dir / "manifest.json").read_text())
     digitizer = AutoDigitizer(device=args.device)
 

@@ -38,6 +38,7 @@ from conftest import Figure  # noqa: E402
 
 DEV_DIR = ROOT / "tests" / "samecolour"
 HOLDOUT_DIR = ROOT / "tests" / "samecolour_holdout"
+HARD_DIR = ROOT / "tests" / "hard"
 ORIGINAL_DIRS = [ROOT / "tests" / "data", ROOT / "tests" / "holdout"]
 
 #: Every series must be at least this pure: points leaking in from a neighbouring
@@ -137,6 +138,65 @@ def test_nothing_that_worked_before_is_split():
                     f"{[p.description for p in parts]}")
 
 
+# -- the failures an independent review found ----------------------------------------
+
+#: Each colour in these holds one series, or the separator has no business splitting it:
+#: scatters in their own colour, shaded bands, related colours, text, closed and folded
+#: curves, sizes of one marker, compression. They must come back as before separation.
+KEEP_WHOLE = [
+    "scatter_o_150a", "scatter_o_150b", "scatter_o_200", "scatter_diamond_100",
+    "scatter_plus_300", "small_dots_ms2", "small_dots_ms3", "grey_band", "blue_band",
+    "two_bands", "shaded_span", "watermark", "navy_and_light", "family_reds",
+    "family_viridis", "ggplot_three", "raw_and_smoothed", "pale_points_dark_fit",
+    "hidpi_line", "legend_unframed_one", "annotated", "ellipse", "voltammogram",
+    "thin_loop", "z_fold", "sawtooth", "sawtooth_thin", "thick_dashdot_alone",
+    "thick_dotted_alone", "bubble_sizes", "two_square_sizes", "jpeg_scatter", "jpeg_grid",
+    "jpeg_legend", "white_markers_line", "white_markers_sine", "dashed_with_markers",
+    "markers_on_dotted", "dashed_grid", "speckled_colours",
+]
+#: And these it must now separate, every series found and none mixed with another.
+SEPARATE = [
+    "x_dash_04", "x_dash_07", "x_dash_10", "x_dot_07", "x_solid_02", "partial_apart",
+    "partial_touching", "partial_overlapping", "three_dashed_055", "three_dashed_04",
+    "thick_line_markers", "converging_markers", "crossing_with_x_markers",
+    "markers_diamond_circle", "markers_left_right", "markers_x_plus", "dash_and_dashdot",
+    "dash_and_longdash", "dash_thin_and_thick", "data_and_fit", "errorbars_and_line",
+    "errorbars_two_shapes", "errorbars_horizontal", "errorbars_dashed",
+    "errorbars_journal", "hidpi_filled", "hidpi_markers", "hidpi_styles", "hidpi_dashdot",
+    "legend_unframed_two", "legend_unframed_four", "journal_three", "markevery_25",
+    "markevery_legend", "thin_and_round_dots", "family_greys", "dashdot_white_markers",
+]
+
+
+@pytest.fixture(scope="module")
+def hard():
+    return {record["name"]: record for record in _ensure(HARD_DIR, "make_hard_cases")["figures"]}
+
+
+@pytest.mark.parametrize("name", KEEP_WHOLE)
+def test_what_is_one_series_stays_one(name, hard, digitizer):
+    result = digitizer.run(load_image(HARD_DIR / hard[name]["file"]))
+    assert all(s.style == "" for s in result.series), \
+        f"{name}: {[s.style for s in result.series]}"
+
+
+@pytest.mark.parametrize("name", SEPARATE)
+def test_what_shares_a_colour_is_told_apart(name, hard, digitizer):
+    from separation_report import score_figure
+    record = hard[name]
+    result = digitizer.run(load_image(HARD_DIR / record["file"]))
+    assert len(result.series) == len(record["series"]), \
+        f"{name}: {[s.style or s.hex_color for s in result.series]}"
+    for score in score_figure(record, [(s.name, s.pixel_points) for s in result.series]):
+        assert score.purity >= 0.85, f"{name}/{score.truth}: purity {score.purity:.2f}"
+
+
+def test_ink_left_unassigned_is_reported(hard, digitizer):
+    """A short third curve beside two long ones is lost, and the warning says where."""
+    result = digitizer.run(load_image(HARD_DIR / hard["short_curve"]["file"]))
+    assert any("in none of the series" in w for w in result.warnings)
+
+
 def test_can_be_turned_off():
     _ensure(DEV_DIR, "make_samecolour")
     image = load_image(DEV_DIR / "sc_styles.png")
@@ -176,19 +236,34 @@ def test_filled_markers_do_not_set_the_stroke_width():
     assert 3.0 <= stroke_thickness(line.astype(bool)) <= 5.5
 
 
+AA = cv2.LINE_AA
+
+
+def _poly(*corners):
+    return lambda im, x, y: cv2.polylines(
+        im, [np.array([[x + dx, y + dy] for dx, dy in corners])], True, 255, 1, AA)
+
+
 @pytest.mark.parametrize("draw,name", [
-    (lambda im, x, y: cv2.circle(im, (x, y), 5, 1, 1), "hollow circle"),
-    (lambda im, x, y: cv2.rectangle(im, (x - 5, y - 5), (x + 5, y + 5), 1, -1), "filled square"),
-    (lambda im, x, y: cv2.polylines(im, [np.array([[x, y - 6], [x - 6, y + 5], [x + 6, y + 5]])],
-                                    True, 1, 1), "hollow triangle"),
-    (lambda im, x, y: cv2.polylines(im, [np.array([[x, y - 6], [x + 6, y], [x, y + 6], [x - 6, y]])],
-                                    True, 1, 1), "hollow diamond"),
-], ids=["circle", "square", "triangle", "diamond"])
+    (lambda im, x, y: cv2.circle(im, (x, y), 5, 255, 1, AA), "hollow circle"),
+    (lambda im, x, y: cv2.rectangle(im, (x - 5, y - 5), (x + 5, y + 5), 255, -1, AA),
+     "filled square"),
+    (_poly((0, -6), (-6, 5), (6, 5)), "hollow triangle"),
+    (_poly((0, 6), (-6, -5), (6, -5)), "hollow down triangle"),
+    (_poly((-6, 0), (5, -6), (5, 6)), "hollow left triangle"),
+    (_poly((6, 0), (-5, -6), (-5, 6)), "hollow right triangle"),
+    (_poly((0, -6), (6, 0), (0, 6), (-6, 0)), "hollow diamond"),
+    (lambda im, x, y: (cv2.line(im, (x - 5, y), (x + 5, y), 255, 1, AA),
+                       cv2.line(im, (x, y - 5), (x, y + 5), 255, 1, AA)), "plus"),
+    (lambda im, x, y: (cv2.line(im, (x - 5, y - 5), (x + 5, y + 5), 255, 1, AA),
+                       cv2.line(im, (x - 5, y + 5), (x + 5, y - 5), 255, 1, AA)), "cross"),
+], ids=["circle", "square", "triangle", "down", "left", "right", "diamond", "plus", "cross"])
 def test_markers_are_recognised_and_named(draw, name):
+    # Drawn anti-aliased, as every plotting library draws them.
     image = _canvas()
     for x in range(30, 380, 40):
         draw(image, x, 80 + (x % 70))
-    classes = _glyph_classes(image.astype(bool), 1.0, SeparationSettings())
+    classes = _glyph_classes(image > 100, 1.0, SeparationSettings())
     assert len(classes) == 1
     assert classes[0].describe() == name
 
@@ -215,12 +290,66 @@ def test_crossing_lines_keep_their_identity():
     cv2.line(image, (10, 220), (390, 90), 1, 2)
     parts = separate_series(image.astype(bool), plot_width=380)
     assert parts is not None and len(parts) == 2
+    slopes = []
     for part in parts:
         line = part.centreline
         slope = np.polyfit(line[:, 0], line[:, 1], 1)[0]
         residual = line[:, 1] - np.polyval(np.polyfit(line[:, 0], line[:, 1], 1), line[:, 0])
         assert abs(slope) > 0.2, "each track keeps its own direction through the crossing"
         assert np.abs(residual).max() < 3.0, "and does not swap lines half way"
+        slopes.append(slope)
+    assert slopes[0] * slopes[1] < 0, "the two parts are the two lines, not one line twice"
+
+
+@pytest.mark.parametrize("slope", [0.2, 0.4, 0.7])
+@pytest.mark.parametrize("style", ["dashed", "dotted"])
+def test_shallow_crossings_keep_their_identity(style, slope):
+    """Lines crossing at 10-35 degrees, where a short slope estimate used to swap them."""
+    image = _canvas(500, 300)
+    # matplotlib's proportions at a 1.5 pt line: 3.7 widths of dash, 1.6 of gap.
+    period, ink = (11, 7) if style == "dashed" else (5, 2)
+    for sign in (1, -1):
+        for x in range(10, 490, period):
+            y0, y1 = 150 + sign * slope * (x - 250), 150 + sign * slope * (x + ink - 250)
+            cv2.line(image, (x, int(round(y0))), (x + ink, int(round(y1))), 1, 2)
+    parts = separate_series(image.astype(bool), plot_width=480)
+    assert parts is not None and len(parts) == 2
+    for part in parts:
+        line = part.centreline
+        left = np.polyfit(*line[line[:, 0] < 200].T, 1)[0]
+        right = np.polyfit(*line[line[:, 0] > 300].T, 1)[0]
+        assert left * right > 0, f"a part turns back at the crossing ({left:.2f}, {right:.2f})"
+
+
+def test_a_closed_curve_is_one_curve():
+    image = _canvas()
+    cv2.ellipse(image, (200, 150), (150, 80), 0, 0, 360, 1, 2)
+    assert separate_series(image.astype(bool), plot_width=380) is None
+
+
+def test_error_bars_stay_with_their_markers():
+    image = _canvas(500, 300)
+    cv2.line(image, (10, 40), (490, 260), 1, 2)
+    for x in range(40, 480, 40):
+        y = 250 - x // 3
+        cv2.line(image, (x, y - 18), (x, y + 18), 1, 2)            # the bar
+        cv2.line(image, (x - 4, y - 18), (x + 4, y - 18), 1, 1)    # and its caps
+        cv2.line(image, (x - 4, y + 18), (x + 4, y + 18), 1, 1)
+        cv2.rectangle(image, (x - 4, y - 4), (x + 4, y + 4), 1, -1)
+    parts = separate_series(image.astype(bool), plot_width=480)
+    assert parts is not None and len(parts) == 2
+    markers = next(p for p in parts if p.kind == "markers")
+    assert markers.description == "filled square markers"
+    assert len(markers.points) == 11
+
+
+def test_text_in_the_plot_is_not_a_series():
+    image = np.zeros((300, 400, 3), np.uint8)
+    cv2.line(image, (10, 250), (390, 60), (255, 255, 255), 2)
+    cv2.putText(image, "measured response", (200, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                (255, 255, 255), 1, cv2.LINE_AA)
+    mask = image[..., 0] > 100
+    assert separate_series(mask, plot_width=380) is None
 
 
 def test_hollow_markers_on_a_line_do_not_derail_it():

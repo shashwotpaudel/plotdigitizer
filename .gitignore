@@ -17,6 +17,7 @@ tests/data/
 tests/holdout/
 tests/samecolour/
 tests/samecolour_holdout/
+tests/hard/
 
 # AppImage build output
 packaging/build/
